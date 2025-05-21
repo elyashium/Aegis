@@ -175,9 +175,9 @@ const Chat: React.FC = () => {
     <Layout fullHeight hideFooter>
       <div className="flex flex-col h-full bg-beige-200">
         {/* Chat container */}
-        <div className="flex-grow overflow-hidden">
-          <div className="container-custom h-full py-6">
-            <div className="bg-white rounded-lg shadow-lg h-full flex flex-col max-h-[calc(100vh-8rem)]">
+        <div className="flex-grow overflow-hidden flex">
+          <div className="container-custom h-full py-6 flex flex-grow">
+            <div className="bg-white rounded-lg shadow-lg flex flex-col w-full h-[calc(100vh-8rem)]">
               {/* Messages area */}
               <div className="flex-grow p-6 overflow-y-auto chat-messages-container">
                 {messages.map((message) => (
@@ -257,7 +257,7 @@ const Chat: React.FC = () => {
               </div>
               
               {/* Input area */}
-              <div className="flex items-end space-x-2 p-4 chat-input-container">
+              <div className="flex items-end space-x-2 p-4 chat-input-container border-t border-beige-100">
                 <div className="flex-grow">
                   <textarea
                     ref={inputRef}
