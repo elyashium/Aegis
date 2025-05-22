@@ -3,8 +3,10 @@ import { motion } from 'framer-motion';
 import { Send, PaperclipIcon, Download, CheckCircle, AlertCircle, Plus, Clock, Search, MoreVertical, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
+import { useOnboarding } from '../contexts/OnboardingContext';
 import { TypeAnimation } from 'react-type-animation';
 import axios from 'axios';
+import CreateDashboardButton from '../components/CreateDashboardButton';
 import { 
   fetchConversations, 
   fetchConversation, 
@@ -108,6 +110,7 @@ const messageFromSupabase = (message: SupabaseMessage): Message => ({
 
 const Chat: React.FC = () => {
   const { user } = useAuth();
+  const { onboardingState } = useOnboarding();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -116,6 +119,8 @@ const Chat: React.FC = () => {
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [searchValue, setSearchValue] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [hasUserSentMessage, setHasUserSentMessage] = useState(false);
+  const [hasReceivedResponse, setHasReceivedResponse] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const activeConversationRef = useRef<string | null>(null);
@@ -272,279 +277,235 @@ const Chat: React.FC = () => {
     }
   };
 
-  // Handle sending a message
+  // Show dashboard button for new idea users who have received a response
+  const shouldShowDashboardButton = () => {
+    return (
+      onboardingState.userType === 'new_idea' && 
+      !onboardingState.dashboardCreated &&
+      hasUserSentMessage && 
+      hasReceivedResponse
+    );
+  };
+
+  // Update handleSendMessage to track that user has sent a message
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || !user) return;
+    if (!inputValue.trim()) return;
     
-    let currentConversationId = activeConversation;
+    const userInput = inputValue.trim();
+    setInputValue('');
+    setShowSuggestions(false);
     
-    // Create a conversation if none exists
-    if (!currentConversationId) {
-      try {
-        const newConversation = await createConversation(
-          user.id, 
-          inputValue.substring(0, 30) + (inputValue.length > 30 ? '...' : '')
-        );
-        
-        if (newConversation) {
-          currentConversationId = newConversation.id;
-          
-          // Add to UI state
-          const uiConversation: Conversation = {
-            id: newConversation.id,
-            title: newConversation.title,
-            lastMessage: '',
-            timestamp: newConversation.timestamp,
-            messages: [],
-            isActive: true
-          };
-          
-          setConversations(prev => [uiConversation, ...prev.map(c => ({ ...c, isActive: false }))]);
-          setActiveConversation(newConversation.id);
-        } else {
-          console.error('Failed to create conversation');
-          return;
-        }
-      } catch (error) {
-        console.error('Error creating conversation for message:', error);
-        return;
-      }
-    }
+    // Create a new message ID
+    const messageId = `msg_${Date.now()}`;
     
-    // Add user message
+    // Create user message
     const userMessage: Message = {
-      id: Date.now().toString(),
-      content: inputValue,
+      id: messageId,
+      content: userInput,
       sender: 'user',
       timestamp: new Date(),
     };
     
+    // Add user message to state
     setMessages(prev => [...prev, userMessage]);
     
-    // Save user message to Supabase
-    try {
-      if (currentConversationId) {
-        await addMessage(messageToSupabase(userMessage, currentConversationId));
-        
-        // Update conversation title if it's a new conversation
-        const currentConversation = conversations.find(c => c.id === currentConversationId);
-        if (currentConversation && currentConversation.title === 'New Conversation') {
-          const newTitle = userMessage.content.substring(0, 30) + (userMessage.content.length > 30 ? '...' : '');
-          await updateConversationTitle(currentConversationId, newTitle);
+    // Scroll to bottom
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+    
+    // Set flag that user has sent a message
+    setHasUserSentMessage(true);
+    
+    // Handle active conversation
+    let currentConversationId = activeConversation;
+    
+    // If no active conversation, create a new one
+    if (!currentConversationId) {
+      try {
+        const newConversation = await createConversation(user!.id);
+        if (newConversation) {
+          currentConversationId = newConversation.id;
+          setActiveConversation(currentConversationId);
+          activeConversationRef.current = currentConversationId;
           
-          // Update UI state
+          // Update UI state with new conversation
+          const uiConversation: Conversation = {
+            id: newConversation.id,
+            title: userInput.slice(0, 30) + (userInput.length > 30 ? '...' : ''),
+            lastMessage: userInput,
+            timestamp: new Date(),
+            messages: [userMessage],
+            isActive: true
+          };
+          
           setConversations(prev => 
-            prev.map(conv => 
-              conv.id === currentConversationId 
-                ? { ...conv, title: newTitle }
-                : conv
-            )
+            [uiConversation, ...prev.map(c => ({ ...c, isActive: false }))]
           );
         }
+      } catch (error) {
+        console.error('Error creating new conversation:', error);
+        return;
       }
-    } catch (error) {
-      console.error('Error saving user message:', error);
     }
     
-    setInputValue('');
-    setShowSuggestions(false);
-    setIsTyping(true);
-    
-    // Create initial empty message for assistant
-    const responseId = `response-${Date.now()}`;
-    const assistantMessage: Message = {
-      id: responseId,
-      content: '',
-      sender: 'assistant',
-      timestamp: new Date(),
-      isStreaming: true,
-    };
-    
-    setMessages(prev => [...prev, assistantMessage]);
-    
-    try {
-      // Call the RAG API
-      const response = await axios.post(`${API_BASE_URL}/get-legal-advice`, {
-        business_query: userMessage.content
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true'
-        },
-        responseType: 'json'
-      });
-      
-      if (response.data && response.data.policy_advice) {
-        // Update the assistant message with the response
-        const assistantResponseContent = response.data.policy_advice;
-        const updatedAssistantMessage = {
-          ...assistantMessage,
-          content: assistantResponseContent,
-          isStreaming: false
-        };
+    // Save message to Supabase if we have an active conversation
+    if (currentConversationId) {
+      try {
+        await addMessage(messageToSupabase(userMessage, currentConversationId));
         
-        setMessages(prev => 
-          prev.map(msg => 
-            msg.id === responseId 
-              ? updatedAssistantMessage
-              : msg
-          )
-        );
-        
-        // Save assistant message to Supabase
-        if (currentConversationId) {
-          await addMessage(messageToSupabase(updatedAssistantMessage, currentConversationId));
+        // Update conversation title if this is the first message
+        const currentConversation = conversations.find(c => c.id === currentConversationId);
+        if (currentConversation && currentConversation.messages.length <= 0) {
+          await updateConversationTitle(
+            currentConversationId, 
+            userInput.slice(0, 30) + (userInput.length > 30 ? '...' : '')
+          );
         }
         
-        // Update conversation last message
+        // Update conversations list
         setConversations(prev => 
-          prev.map(conv => 
-            conv.isActive 
-              ? {
-                  ...conv,
-                  lastMessage: assistantResponseContent.substring(0, 60) + (assistantResponseContent.length > 60 ? '...' : ''),
-                  timestamp: new Date()
-                }
-              : conv
-          )
-        );
-      } else {
-        throw new Error("Unexpected response format");
-      }
-    } catch (error) {
-      console.error("Error fetching advice:", error);
-      let errorMessage = "I'm sorry, I couldn't process your request at the moment. ";
-      
-      if (axios.isAxiosError(error) && error.response) {
-        errorMessage += `Error: ${error.response.status}`;
-        if (error.response.data && error.response.data.detail) {
-          errorMessage += ` - ${error.response.data.detail}`;
-        }
-      } else if (axios.isAxiosError(error) && error.request) {
-        errorMessage += "No response received from the server. The API might be down or unreachable.";
-      } else {
-        errorMessage += "An unexpected error occurred.";
-      }
-      
-      // Update the assistant message with the error
-      const errorAssistantMessage = {
-        ...assistantMessage,
-        content: errorMessage,
-        isStreaming: false,
-        isError: true
-      };
-      
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === responseId 
-            ? errorAssistantMessage
-            : msg
-        )
-      );
-      
-      // Save error message to Supabase
-      if (currentConversationId) {
-        await addMessage(messageToSupabase(errorAssistantMessage, currentConversationId));
-      }
-      
-      // Update conversation last message with error indicator
-      setConversations(prev => 
-        prev.map(conv => 
-          conv.isActive 
-            ? {
+          prev.map(conv => {
+            if (conv.id === currentConversationId) {
+              return {
                 ...conv,
-                lastMessage: "Error: Could not get response",
-                timestamp: new Date()
-              }
-            : conv
-        )
-      );
-    } finally {
-      setIsTyping(false);
+                lastMessage: userMessage.content,
+                timestamp: new Date(),
+                messages: [...conv.messages, userMessage]
+              };
+            }
+            return conv;
+          })
+        );
+      } catch (error) {
+        console.error('Error saving message:', error);
+      }
     }
+    
+    // Get AI response (use streaming)
+    await handleStreamingResponse(userInput);
   };
 
-  // For streaming API support in the future
+  // Update handleStreamingResponse to set response received flag
   const handleStreamingResponse = async (userInput: string) => {
-    const responseId = `response-${Date.now()}`;
-    
-    // Create initial empty message
-    const assistantMessage: Message = {
+    // Create a placeholder for the assistant's response
+    const responseId = `resp_${Date.now()}`;
+    const assistantMessagePlaceholder: Message = {
       id: responseId,
       content: '',
       sender: 'assistant',
       timestamp: new Date(),
-      isStreaming: true,
+      isStreaming: true
     };
     
-    setMessages(prev => [...prev, assistantMessage]);
+    // Add the placeholder to the UI
+    setMessages(prev => [...prev, assistantMessagePlaceholder]);
+    setIsTyping(true);
+    
+    // Auto scroll
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
     
     try {
-      // Uses fetch for streaming support
-      const response = await fetch(`${API_BASE_URL}/get-streaming-legal-advice`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true'
-        },
-        body: JSON.stringify({ business_query: userInput })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Error: ${response.status}`);
+      // In development, simulate streaming
+      if (isDev) {
+        await simulateResponseWithId(userInput, responseId);
+        setIsTyping(false);
+        setHasReceivedResponse(true);
+        return;
       }
       
-      if (!response.body) {
-        throw new Error("ReadableStream not supported");
-      }
+      // In production, make a real API call
+      const response = await axios.post(
+        `${API_BASE_URL}/chat`,
+        { message: userInput },
+        { responseType: 'stream' }
+      );
       
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let content = '';
+      // Process the streaming response
+      const reader = response.data.getReader();
+      let receivedContent = '';
       
       while (true) {
-        const { done, value } = await reader.read();
+        const { value, done } = await reader.read();
         
         if (done) {
+          // Once stream is done, update the assistant message
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === responseId
+                ? { ...msg, content: receivedContent, isStreaming: false }
+                : msg
+            )
+          );
+          
+          // Mark as received response
+          setHasReceivedResponse(true);
+          
+          // Save the final message to Supabase
+          if (activeConversation) {
+            const finalMessage: Message = {
+              id: responseId,
+              content: receivedContent,
+              sender: 'assistant',
+              timestamp: new Date()
+            };
+            
+            try {
+              await addMessage(messageToSupabase(finalMessage, activeConversation));
+              
+              // Update conversations list
+              setConversations(prev => 
+                prev.map(conv => {
+                  if (conv.id === activeConversation) {
+                    return {
+                      ...conv,
+                      lastMessage: finalMessage.content.substring(0, 50) + (finalMessage.content.length > 50 ? '...' : ''),
+                      timestamp: new Date(),
+                      messages: [...conv.messages, finalMessage]
+                    };
+                  }
+                  return conv;
+                })
+              );
+            } catch (error) {
+              console.error('Error saving assistant response:', error);
+            }
+          }
+          
           break;
         }
         
-        // Decode and append the chunk
-        const chunk = decoder.decode(value, { stream: true });
-        content += chunk;
+        // Update the content with the new chunk
+        const chunk = new TextDecoder().decode(value);
+        receivedContent += chunk;
         
-        // Update the message with the current content
+        // Update the message in real time
         setMessages(prev => 
           prev.map(msg => 
-            msg.id === responseId 
-              ? { ...msg, content: content, isStreaming: !done } 
+            msg.id === responseId
+              ? { ...msg, content: receivedContent }
               : msg
           )
         );
+        
+        // Auto scroll as content comes in
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }
-      
-      // Final update to mark streaming as complete
-      setMessages(prev => 
-        prev.map(msg => 
-          msg.id === responseId 
-            ? { ...msg, isStreaming: false } 
-            : msg
-        )
-      );
-      
     } catch (error) {
-      console.error("Error with streaming response:", error);
-      let errorMessage = "I'm sorry, I couldn't process your streaming request. ";
+      console.error('Error getting response:', error);
       
-      if (error instanceof Error) {
-        errorMessage += error.message;
-      }
-      
-      // Update with error message
+      // Show error message
       setMessages(prev => 
         prev.map(msg => 
-          msg.id === responseId 
-            ? { ...msg, content: errorMessage, isStreaming: false, isError: true } 
+          msg.id === responseId
+            ? {
+                ...msg,
+                content: 'Sorry, I encountered an error. Please try again.',
+                isStreaming: false,
+                isError: true
+              }
             : msg
         )
       );
@@ -912,6 +873,11 @@ const Chat: React.FC = () => {
                     </motion.div>
                   ))}
                   <div ref={messagesEndRef} />
+                  
+                  {/* Create Dashboard button for new idea users */}
+                  {shouldShowDashboardButton() && (
+                    <CreateDashboardButton className="mt-4 max-w-sm mx-auto" />
+                  )}
                   
                   {/* Suggestions */}
                   {showSuggestions && messages.length <= 1 && (

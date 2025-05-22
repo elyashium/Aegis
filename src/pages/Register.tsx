@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useOnboarding } from '../contexts/OnboardingContext';
 import Layout from '../components/Layout';
 
 const Register: React.FC = () => {
@@ -10,6 +11,7 @@ const Register: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { signUp } = useAuth();
+  const { resetOnboarding } = useOnboarding();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -41,8 +43,11 @@ const Register: React.FC = () => {
         return;
       }
       
-      // Redirect to chat on successful signup
-      navigate('/chat');
+      // Reset onboarding state for a new user
+      resetOnboarding();
+      
+      // Redirect to onboarding
+      navigate('/onboarding');
     } catch (err) {
       console.error('Registration error:', err);
       setError('An unexpected error occurred. Please try again.');

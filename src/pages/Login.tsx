@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useOnboarding } from '../contexts/OnboardingContext';
 import Layout from '../components/Layout';
 
 const Login: React.FC = () => {
@@ -9,6 +10,7 @@ const Login: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const { signIn } = useAuth();
+  const { onboardingState } = useOnboarding();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,8 +32,18 @@ const Login: React.FC = () => {
         return;
       }
       
-      // Redirect to chat on successful login
-      navigate('/chat');
+      // On successful login, redirect based on onboarding state
+      if (onboardingState.isOnboarded) {
+        // User has completed onboarding
+        if (onboardingState.dashboardCreated) {
+          navigate('/dashboard');
+        } else {
+          navigate('/chat');
+        }
+      } else {
+        // User needs to go through onboarding
+        navigate('/onboarding');
+      }
     } catch (err) {
       console.error('Login error:', err);
       setError('An unexpected error occurred. Please try again.');
