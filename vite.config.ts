@@ -10,9 +10,12 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://3cc5-35-223-63-209.ngrok-free.app',
+        target: 'https://fd0d-34-57-163-201.ngrok-free.app',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
+        rewrite: (path) => path.replace(/^\/api/, ''),
+        headers: {
+          'ngrok-skip-browser-warning': 'true'
+        }
       }
     }
   }

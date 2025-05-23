@@ -392,169 +392,119 @@ const Chat: React.FC = () => {
     const responseId = `resp_${Date.now()}`;
     const assistantMessagePlaceholder: Message = {
       id: responseId,
-      content: '',
+      content: '', // Will be filled by API or error
       sender: 'assistant',
       timestamp: new Date(),
-      isStreaming: true
+      isStreaming: false, // Default to false, as API is non-streaming
     };
-    
+
     // Add the placeholder to the UI
     setMessages(prev => [...prev, assistantMessagePlaceholder]);
     setIsTyping(true);
-    
+
     // Auto scroll
     setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 100);
-    
+
     try {
-      // In development, simulate streaming
-      if (isDev) {
-        await simulateResponseWithId(userInput, responseId);
-        setIsTyping(false);
-        setHasReceivedResponse(true);
-        return;
-      }
-      
-      // In production, make a real API call
+      // Make the API call (non-streaming)
       const response = await axios.post(
-        `${API_BASE_URL}/chat`,
-        { message: userInput },
-        { responseType: 'stream' }
-      );
-      
-      // Process the streaming response
-      const reader = response.data.getReader();
-      let receivedContent = '';
-      
-      while (true) {
-        const { value, done } = await reader.read();
-        
-        if (done) {
-          // Once stream is done, update the assistant message
-          setMessages(prev => 
-            prev.map(msg => 
-              msg.id === responseId
-                ? { ...msg, content: receivedContent, isStreaming: false }
-                : msg
-            )
-          );
-          
-          // Mark as received response
-          setHasReceivedResponse(true);
-          
-          // Save the final message to Supabase
-          if (activeConversation) {
-            const finalMessage: Message = {
-              id: responseId,
-              content: receivedContent,
-              sender: 'assistant',
-              timestamp: new Date()
-            };
-            
-            try {
-              await addMessage(messageToSupabase(finalMessage, activeConversation));
-              
-              // Update conversations list
-              setConversations(prev => 
-                prev.map(conv => {
-                  if (conv.id === activeConversation) {
-                    return {
-                      ...conv,
-                      lastMessage: finalMessage.content.substring(0, 50) + (finalMessage.content.length > 50 ? '...' : ''),
-                      timestamp: new Date(),
-                      messages: [...conv.messages, finalMessage]
-                    };
-                  }
-                  return conv;
-                })
-              );
-            } catch (error) {
-              console.error('Error saving assistant response:', error);
-            }
+        `${API_BASE_URL}/get-legal-advice`, 
+        { business_query: userInput },      
+        {
+          headers: {
+            'Content-Type': 'application/json'
+            // 'ngrok-skip-browser-warning': 'true' // Add if ngrok shows warning page
           }
-          
-          break;
         }
-        
-        // Update the content with the new chunk
-        const chunk = new TextDecoder().decode(value);
-        receivedContent += chunk;
-        
-        // Update the message in real time
-        setMessages(prev => 
-          prev.map(msg => 
-            msg.id === responseId
-              ? { ...msg, content: receivedContent }
-              : msg
-          )
-        );
-        
-        // Auto scroll as content comes in
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      );
+
+      let assistantContent = '';
+      if (response.data && response.data.policy_advice) {
+        assistantContent = response.data.policy_advice;
+        setHasReceivedResponse(true);
+      } else {
+        console.error('Unexpected response format:', response.data);
+        assistantContent = 'Sorry, I received an unexpected response from the server.';
+        setHasReceivedResponse(false);
       }
-    } catch (error) {
+
+      // Update the assistant message with the full content
+      setMessages(prev =>
+        prev.map(msg =>
+          msg.id === responseId
+            ? { ...msg, content: assistantContent, isStreaming: false, isError: !response.data?.policy_advice }
+            : msg
+        )
+      );
+
+      // Save the final message to Supabase
+      if (activeConversation && response.data && response.data.policy_advice) {
+        const finalMessage: Message = {
+          id: responseId, // Use the same ID as the placeholder
+          content: assistantContent,
+          sender: 'assistant',
+          timestamp: new Date()
+        };
+
+        try {
+          await addMessage(messageToSupabase(finalMessage, activeConversation));
+
+          // Update conversations list
+          setConversations(prev =>
+            prev.map(conv => {
+              if (conv.id === activeConversation) {
+                return {
+                  ...conv,
+                  lastMessage: finalMessage.content.substring(0, 50) + (finalMessage.content.length > 50 ? '...' : ''),
+                  timestamp: new Date(),
+                  // Ensure messages array in conversation is also updated if you rely on it directly
+                  // For simplicity, assuming messages state is the source of truth for display
+                  // and conversation.messages might be for persistence or quick preview.
+                };
+              }
+              return conv;
+            })
+          );
+        } catch (error) {
+          console.error('Error saving assistant response:', error);
+        }
+      }
+
+    } catch (error: any) {
       console.error('Error getting response:', error);
+      let errorMessage = "Sorry, I encountered an error. Please try again.";
+      if (error.response) {
+        errorMessage += ` Server responded with status ${error.response.status}.`;
+        if (error.response.data && error.response.data.detail) {
+          errorMessage += ` Details: ${error.response.data.detail}`;
+        }
+      } else if (error.request) {
+        errorMessage += " No response received from the server. The API might be down or unreachable.";
+      } else {
+        errorMessage += ` Error: ${error.message}`;
+      }
       
-      // Show error message
-      setMessages(prev => 
-        prev.map(msg => 
+      // Show error message in the chat
+      setMessages(prev =>
+        prev.map(msg =>
           msg.id === responseId
             ? {
                 ...msg,
-                content: 'Sorry, I encountered an error. Please try again.',
+                content: errorMessage,
                 isStreaming: false,
                 isError: true
               }
             : msg
         )
       );
+      setHasReceivedResponse(false); // Indicate that a valid response wasn't received.
     } finally {
       setIsTyping(false);
+      // Auto scroll after processing is done
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  };
-
-  // Fallback to simulated response when API fails (for demo purposes)
-  const simulateResponseWithId = (userInput: string, responseId: string) => {
-    // Generate response based on user input
-    let response = '';
-    
-    if (userInput.toLowerCase().includes('nda')) {
-      response = "I'd be happy to help you draft an NDA (Non-Disclosure Agreement). To create a customized document, I'll need some information:\n\n1. Is this a one-way or mutual NDA?\n2. Who is the disclosing party (the one sharing confidential information)?\n3. Who is the receiving party?\n4. What's the primary purpose of sharing the confidential information?\n5. How long should the confidentiality obligations last?\n\nOnce you provide these details, I can generate a draft NDA for your review.";
-    } 
-    else if (userInput.toLowerCase().includes('legal structure') || userInput.toLowerCase().includes('incorporation')) {
-      response = "Choosing the right legal structure for your startup is a crucial decision. The most common options are:\n\n**LLC (Limited Liability Company)**\n- Pros: Limited liability protection, pass-through taxation, management flexibility\n- Cons: Self-employment taxes, potential issues with raising venture capital\n\n**C Corporation**\n- Pros: Limited liability, easier to raise VC funding, unlimited shareholders\n- Cons: Double taxation, more formalities and paperwork\n\n**S Corporation**\n- Pros: Pass-through taxation, limited liability\n- Cons: Shareholder restrictions, stricter operational requirements\n\nBased on your specific situation, I can provide a more tailored recommendation. Could you tell me more about your business, funding plans, and growth expectations?";
-    }
-    else if (userInput.toLowerCase().includes('gdpr') || userInput.toLowerCase().includes('compliance')) {
-      response = "GDPR (General Data Protection Regulation) compliance is essential for businesses handling EU citizens' data. Key requirements include:\n\n1. **Lawful Basis for Processing**: You must have a valid legal reason to process personal data\n2. **Data Subject Rights**: Provide rights like access, erasure, and portability\n3. **Privacy by Design**: Implement data protection measures from the start\n4. **Data Breach Notification**: Report breaches within 72 hours\n5. **Data Protection Impact Assessments**: For high-risk processing\n6. **Records of Processing**: Maintain documentation of data activities\n\nWould you like me to create a GDPR compliance checklist specific to your startup? I can add it to your dashboard for tracking progress.";
-    }
-    else if (userInput.toLowerCase().includes('founder agreement')) {
-      response = "A founder agreement is crucial for establishing clear expectations and responsibilities. I can help you draft one that includes:\n\n1. **Equity Distribution**: How ownership is divided among founders\n2. **Roles and Responsibilities**: Clear definition of each founder's duties\n3. **Vesting Schedule**: Typically 4-year vesting with a 1-year cliff\n4. **Intellectual Property Assignment**: Ensuring all IP belongs to the company\n5. **Decision-making Process**: How major decisions will be made\n6. **Exit and Termination Provisions**: What happens if a founder leaves\n\nTo create a customized founder agreement, I'll need details about your co-founders, planned equity split, and specific roles. Would you like to proceed with drafting this document?";
-    }
-    else {
-      response = "Thank you for your message. To provide the most helpful guidance, could you share a bit more about your startup? Specifically:\n\n1. What industry are you in?\n2. What stage is your business (idea, pre-launch, operating)?\n3. Do you have co-founders?\n4. Are you seeking investment?\n\nThis context will help me tailor my legal guidance to your specific situation.";
-    }
-    
-    // Simulate streaming by updating the message character by character
-    let currentText = '';
-    const words = response.split(' ');
-    
-    const streamInterval = setInterval(() => {
-      if (words.length > 0) {
-        currentText += words.shift() + ' ';
-        
-        setMessages(prev => 
-          prev.map(msg => 
-            msg.id === responseId 
-              ? { ...msg, content: currentText, isStreaming: words.length > 0 } 
-              : msg
-          )
-        );
-      } else {
-        clearInterval(streamInterval);
-        setIsTyping(false);
-      }
-    }, 50); // Adjust speed as needed
   };
 
   // Handle suggestion click
