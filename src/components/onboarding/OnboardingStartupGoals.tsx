@@ -1,14 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOnboarding } from '../../contexts/OnboardingContext';
-import { ArrowLeft, CheckCircle } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { ArrowLeft } from 'lucide-react';
 
 const OnboardingStartupGoals: React.FC = () => {
   const { onboardingState, updateStartupProfile, prevStep, completeOnboarding, createDashboard } = useOnboarding();
   const [goals, setGoals] = useState(onboardingState.startupProfile.goals || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -22,57 +20,23 @@ const OnboardingStartupGoals: React.FC = () => {
       // Mark onboarding as complete
       await completeOnboarding();
       
-      // Show success state briefly
-      setIsComplete(true);
-      
       // Create the dashboard based on the profile info
       await createDashboard();
       
-      // Short delay before navigating to give user feedback
-      setTimeout(() => {
-        // Navigate to dashboard
-        navigate('/dashboard');
-      }, 1500);
+      // Navigate to dashboard
+      navigate('/dashboard');
     } catch (error) {
       console.error('Error completing onboarding:', error);
+    } finally {
       setIsSubmitting(false);
     }
   };
-
-  if (isComplete) {
-    return (
-      <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="text-center py-8"
-      >
-        <motion.div
-          initial={{ scale: 0.8 }}
-          animate={{ scale: 1 }}
-          transition={{ type: "spring", stiffness: 300, damping: 20 }}
-          className="flex justify-center mb-6"
-        >
-          <div className="bg-green-100 p-4 rounded-full">
-            <CheckCircle size={48} className="text-green-600" />
-          </div>
-        </motion.div>
-        <h2 className="text-2xl font-playfair mb-2 text-text-primary">
-          Onboarding Complete!
-        </h2>
-        <p className="text-text-secondary mb-4">
-          Your dashboard is being created. You'll be redirected shortly...
-        </p>
-        <div className="w-12 h-12 border-4 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-      </motion.div>
-    );
-  }
 
   return (
     <div>
       <button 
         onClick={prevStep}
         className="flex items-center text-text-secondary mb-8 hover:text-text-primary transition-colors"
-        disabled={isSubmitting}
       >
         <ArrowLeft size={16} className="mr-1" />
         <span>Back</span>
@@ -96,7 +60,6 @@ const OnboardingStartupGoals: React.FC = () => {
             onChange={(e) => setGoals(e.target.value)}
             className="input-field w-full min-h-[150px]"
             placeholder="Example: I need to create a privacy policy for my app, set up contracts for new hires, and understand intellectual property protections for my software."
-            disabled={isSubmitting}
           />
           <p className="text-text-tertiary text-xs mt-1">
             Be specific about what legal documents, compliance measures, or legal advice you need.
@@ -115,7 +78,7 @@ const OnboardingStartupGoals: React.FC = () => {
                 Creating Your Dashboard...
               </span>
             ) : (
-              'Complete & Create Dashboard'
+              'Create Your Dashboard'
             )}
           </button>
         </div>
