@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { FileText, CheckSquare, AlertCircle, Clock, Download, ExternalLink, Loader2, Upload, RefreshCw, Trash2 } from 'lucide-react';
+import { FileText, CheckSquare, AlertCircle, Clock, Download, ExternalLink, Loader2, Upload, RefreshCw, Trash2, Edit, Save, X } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
@@ -15,6 +15,9 @@ import { Badge } from '../components/ui/badge';
 import { Checkbox } from '../components/ui/checkbox';
 import { Label } from '../components/ui/label';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
+import { supabase } from '../utils/supabaseClient';
 // import { toast } from '../components/ui/use-toast';
 
 // Helper function to determine if a checklist should be filtered out
@@ -126,13 +129,46 @@ const ChecklistTab: React.FC<{ checklist: Checklist }> = ({ checklist }) => {
 
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
-  const { onboardingState } = useOnboarding();
+  const { onboardingState, updateStartupProfile, completeOnboarding } = useOnboarding();
   const { startupProfile } = onboardingState;
   const [userChecklists, setUserChecklists] = useState<Checklist[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const location = useLocation();
   const navigate = useNavigate();
+  
+  // New state for profile editing
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editedProfile, setEditedProfile] = useState({ ...startupProfile });
+  const [savingProfile, setSavingProfile] = useState(false);
+  
+  // Industry options for dropdown
+  const industryOptions = [
+    "Technology",
+    "Healthcare",
+    "Finance",
+    "Education",
+    "Retail",
+    "Manufacturing",
+    "Real Estate",
+    "Entertainment",
+    "Food & Beverage",
+    "Transportation",
+    "Legal Services",
+    "Other"
+  ];
+  
+  // Entity type options for dropdown
+  const entityTypeOptions = [
+    "Sole Proprietorship",
+    "Partnership",
+    "Limited Liability Company (LLC)",
+    "Corporation",
+    "S Corporation",
+    "Nonprofit",
+    "Not yet registered",
+    "Other"
+  ];
   
   // Load checklists for dynamic tabs
   const loadChecklists = async () => {
@@ -240,6 +276,59 @@ const Dashboard: React.FC = () => {
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state, user, navigate]); // Add user to dependencies, as loadChecklists depends on it
+  
+  useEffect(() => {
+    // Initialize edited profile whenever startupProfile changes
+    setEditedProfile({ ...startupProfile });
+  }, [startupProfile]);
+  
+  // Handle profile edit changes
+  const handleProfileChange = (field: string, value: string | string[]) => {
+    setEditedProfile(prev => ({ ...prev, [field]: value }));
+  };
+  
+  // Save profile changes to Supabase
+  const saveProfileChanges = async () => {
+    if (!user) return;
+    
+    setSavingProfile(true);
+    
+    try {
+      // First update the context
+      updateStartupProfile(editedProfile);
+      
+      // Then save to Supabase
+      await supabase
+        .from('user_profiles')
+        .upsert({
+          user_id: user.id,
+          company_name: editedProfile.companyName,
+          entity_type: editedProfile.entityType,
+          industry: editedProfile.industry,
+          location: editedProfile.location,
+          stage: editedProfile.stage,
+          key_concerns: editedProfile.keyConcerns,
+          goals: editedProfile.goals,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+      
+      // Call completeOnboarding to ensure all changes are saved
+      await completeOnboarding();
+      
+      // Exit edit mode
+      setIsEditingProfile(false);
+    } catch (error) {
+      console.error("Error saving profile changes:", error);
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+  
+  // Cancel editing and reset form
+  const cancelEditing = () => {
+    setEditedProfile({ ...startupProfile });
+    setIsEditingProfile(false);
+  };
   
   // Sample data - in a real app, this would come from your backend
   const documents = [
@@ -365,26 +454,115 @@ const Dashboard: React.FC = () => {
                   >
                     <div className="flex justify-between items-center mb-4">
                       <h2 className="text-xl font-playfair text-teal-600">Startup Profile</h2>
-                      <Link to="/onboarding" className="text-sm text-teal-600 hover:text-teal-700">Edit</Link>
+                      {isEditingProfile ? (
+                        <div className="flex gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={cancelEditing}
+                            className="flex items-center gap-1"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                            Cancel
+                          </Button>
+                          <Button 
+                            variant="default" 
+                            size="sm" 
+                            onClick={saveProfileChanges}
+                            disabled={savingProfile}
+                            className="flex items-center gap-1"
+                          >
+                            <Save className="h-3.5 w-3.5" />
+                            {savingProfile ? "Saving..." : "Save"}
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => setIsEditingProfile(true)}
+                          className="flex items-center gap-1"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                          Edit Profile
+                        </Button>
+                      )}
                     </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <h3 className="text-sm text-text-tertiary">Company Name</h3>
-                        <p className="font-medium">{startupProfile.companyName || 'Not specified'}</p>
-                      </div>
-                      <div>
-                        <h3 className="text-sm text-text-tertiary">Entity Type</h3>
-                        <p className="font-medium">{startupProfile.entityType || 'Not specified'}</p>
-                      </div>
-                      <div>
-                        <h3 className="text-sm text-text-tertiary">Industry</h3>
-                        <p className="font-medium">{startupProfile.industry || 'Not specified'}</p>
-                      </div>
-                      <div>
-                        <h3 className="text-sm text-text-tertiary">Location</h3>
-                        <p className="font-medium">{startupProfile.location || 'Not specified'}</p>
-                      </div>
+                      {isEditingProfile ? (
+                        <>
+                          <div className="space-y-2">
+                            <Label htmlFor="companyName" className="text-sm text-text-tertiary">Company Name</Label>
+                            <Input 
+                              id="companyName"
+                              value={editedProfile.companyName || ''}
+                              onChange={e => handleProfileChange('companyName', e.target.value)}
+                              placeholder="Enter company name"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="entityType" className="text-sm text-text-tertiary">Entity Type</Label>
+                            <Select 
+                              value={editedProfile.entityType || ''} 
+                              onValueChange={value => handleProfileChange('entityType', value)}
+                            >
+                              <SelectTrigger id="entityType">
+                                <SelectValue placeholder="Select entity type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {entityTypeOptions.map(type => (
+                                  <SelectItem key={type} value={type}>{type}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="industry" className="text-sm text-text-tertiary">Industry</Label>
+                            <Select 
+                              value={editedProfile.industry || ''} 
+                              onValueChange={value => handleProfileChange('industry', value)}
+                            >
+                              <SelectTrigger id="industry">
+                                <SelectValue placeholder="Select industry" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {industryOptions.map(industry => (
+                                  <SelectItem key={industry} value={industry}>{industry}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="location" className="text-sm text-text-tertiary">Location</Label>
+                            <Input 
+                              id="location"
+                              value={editedProfile.location || ''}
+                              onChange={e => handleProfileChange('location', e.target.value)}
+                              placeholder="Enter location"
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>
+                            <h3 className="text-sm text-text-tertiary">Company Name</h3>
+                            <p className="font-medium">{startupProfile.companyName || 'Not specified'}</p>
+                          </div>
+                          <div>
+                            <h3 className="text-sm text-text-tertiary">Entity Type</h3>
+                            <p className="font-medium">{startupProfile.entityType || 'Not specified'}</p>
+                          </div>
+                          <div>
+                            <h3 className="text-sm text-text-tertiary">Industry</h3>
+                            <p className="font-medium">{startupProfile.industry || 'Not specified'}</p>
+                          </div>
+                          <div>
+                            <h3 className="text-sm text-text-tertiary">Location</h3>
+                            <p className="font-medium">{startupProfile.location || 'Not specified'}</p>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </motion.div>
                   
