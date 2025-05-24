@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
-import { FileText, CheckSquare, AlertCircle, Clock, Download, ExternalLink } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { FileText, CheckSquare, AlertCircle, Clock, Download, ExternalLink, Loader2, Upload, RefreshCw } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
@@ -9,73 +9,263 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import UploadTab from '../components/UploadTab';
 import ComplianceTab from '../components/ComplianceTab';
 import WebPresenceTab from '../components/WebPresenceTab';
+import { fetchChecklistsForUser, fetchChecklistItemsForChecklist, Checklist, ChecklistItem } from '../utils/dashboardUtils';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Badge } from '../components/ui/badge';
+import { Checkbox } from '../components/ui/checkbox';
+import { Label } from '../components/ui/label';
+import { Button } from '../components/ui/button';
+
+// Component for dynamically generated checklist tabs
+const ChecklistTab: React.FC<{ checklist: Checklist }> = ({ checklist }) => {
+  const [items, setItems] = useState<ChecklistItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadItems = async () => {
+      try {
+        const checklistItems = await fetchChecklistItemsForChecklist(checklist.id);
+        setItems(checklistItems || []);
+      } catch (err: any) {
+        console.error(`Error loading items for checklist ${checklist.id}:`, err);
+        setError(err.message || 'Failed to load checklist items');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadItems();
+  }, [checklist.id]);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-10">
+        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+        <span className="ml-2">Loading checklist items...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-10 text-red-600">
+        <AlertCircle className="h-8 w-8 mx-auto mb-2" />
+        <p>Error: {error}</p>
+      </div>
+    );
+  }
+
+  const completedCount = items.filter(item => item.completed).length;
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>{checklist.name}</CardTitle>
+          <CardDescription>
+            {completedCount} of {items.length} items completed
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {items.map((item) => (
+              <div key={item.id} className="flex items-start justify-between py-3 border-b last:border-0">
+                <div className="flex items-start gap-3">
+                  <Checkbox 
+                    id={item.id} 
+                    checked={item.completed}
+                    // Read-only in this view - users can update in the Compliance tab
+                    disabled
+                  />
+                  <div>
+                    <Label htmlFor={item.id} className={`font-medium ${item.completed ? 'line-through text-text-tertiary' : ''}`}>
+                      {item.text}
+                    </Label>
+                  </div>
+                </div>
+                <div>
+                  <Badge variant="outline" className={item.completed 
+                    ? "bg-green-50 text-green-700 border-green-200"
+                    : "bg-amber-50 text-amber-700 border-amber-200"
+                  }>
+                    {item.completed ? "Complete" : "Pending"}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
 
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const { onboardingState } = useOnboarding();
   const { startupProfile } = onboardingState;
+  const [userChecklists, setUserChecklists] = useState<Checklist[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('overview');
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  // Load checklists for dynamic tabs
+  const loadChecklists = async () => {
+    if (!user) return;
+    
+    try {
+      console.log('Loading checklists for user...');
+      const checklists = await fetchChecklistsForUser(user.id);
+      console.log('Fetched checklists:', checklists);
+      
+      // Filter out ANY compliance-related checklists as they should only appear in the Compliance tab
+      const filteredChecklists = checklists.filter(
+        checklist => 
+          checklist.name !== 'Compliance Dashboard' &&
+          !checklist.name.toLowerCase().includes('compliance') &&
+          !checklist.name.toLowerCase().includes('legal requirement') &&
+          !checklist.name.toLowerCase().includes('compliance checklist') &&
+          !checklist.name.toLowerCase().includes('compliance dashboard')
+      );
+      console.log('Filtered checklists (excluding compliance):', filteredChecklists);
+      setUserChecklists(filteredChecklists);
+    } catch (err) {
+      console.error('Error loading checklists:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  useEffect(() => {
+    loadChecklists();
+  }, [user]);
+  
+  // Check for state from navigation (used when redirected from AbsorbGuidanceButton)
+  useEffect(() => {
+    if (location.state?.refreshChecklists) {
+      console.log('Dashboard received refresh signal, reloading checklists...');
+      setLoading(true); // Set loading true before starting to load checklists
+      loadChecklists(); // This already sets loading to false in its finally block
+      
+      let intendedTab = location.state.activeTab;
+      console.log('Dashboard received intendedTab from location state:', intendedTab);
+
+      // Check if the intended tab is a checklist ID that matches the "Compliance Dashboard"
+      if (intendedTab && intendedTab.startsWith('checklist-')) {
+        const checklistIdFromState = intendedTab.replace('checklist-', '');
+        // We need to access the full userChecklists *before* filtering to check its name
+        // This check is a bit tricky because userChecklists (filtered) won't have it.
+        // A simpler approach is to rely on the AbsorbGuidanceButton sending 'compliance' directly.
+        // However, if it *could* send an ID that IS the compliance dashboard, we'd need to fetch raw list.
+        // For now, we assume AbsorbGuidanceButton sends 'compliance' for the compliance tab.
+        // The `userChecklists` state variable already filters out the "Compliance Dashboard".
+        // So, if `intendedTab` refers to a checklist ID that *is* the compliance dashboard ID,
+        // it wouldn't be found in `userChecklists.map(c => c.id)`. 
+        // The filter in `loadChecklists` ensures Compliance Dashboard isn't in `userChecklists`.
+        
+        // If AbsorbGuidanceButton sends the specific ID of the compliance dashboard, 
+        // we would need to compare it against the known name or have a way to identify it.
+        // The current filtering in loadChecklists correctly removes it from dynamic tab generation.
+        // The AbsorbGuidanceButton logic was updated to send 'compliance' string directly.
+      }
+      
+      if (intendedTab) {
+        console.log('Setting active tab to:', intendedTab);
+        setActiveTab(intendedTab);
+      }
+      // Clear the state to prevent re-triggering on other renders
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, user, navigate]); // Add user to dependencies, as loadChecklists depends on it
   
   // Sample data - in a real app, this would come from your backend
   const documents = [
     { id: 1, name: 'Non-Disclosure Agreement', date: '2025-04-10', type: 'Legal Document' },
     { id: 2, name: 'Terms of Service', date: '2025-04-05', type: 'Legal Document' },
   ];
-  
-  const checklists = [
-    { 
-      id: 1, 
-      name: 'GDPR Compliance', 
-      progress: 25, 
-      items: [
-        { id: 1, text: 'Privacy Policy Implementation', completed: true },
-        { id: 2, text: 'Data Processing Register', completed: true },
-        { id: 3, text: 'Consent Mechanisms', completed: true },
-        { id: 4, text: 'Data Subject Rights Procedures', completed: false },
-        { id: 5, text: 'Data Breach Notification Process', completed: false },
-        { id: 6, text: 'Data Protection Impact Assessment', completed: false },
-        { id: 7, text: 'International Data Transfer Safeguards', completed: false },
-        { id: 8, text: 'Appoint Data Protection Officer', completed: false },
-      ]
-    },
-    { 
-      id: 2, 
-      name: 'Startup Incorporation', 
-      progress: 60, 
-      items: [
-        { id: 1, text: 'Choose Business Entity', completed: true },
-        { id: 2, text: 'File Formation Documents', completed: true },
-        { id: 3, text: 'Obtain EIN', completed: true },
-        { id: 4, text: 'Draft Bylaws/Operating Agreement', completed: false },
-        { id: 5, text: 'Open Business Bank Account', completed: false },
-      ]
-    }
-  ];
-  
+
   const recentActivity = [
-    { id: 1, text: 'Generated Non-Disclosure Agreement', date: '2025-04-10', type: 'document' },
-    { id: 2, text: 'Updated GDPR Compliance Checklist', date: '2025-04-08', type: 'checklist' },
-    { id: 3, text: 'Discussed incorporation options', date: '2025-04-05', type: 'chat' },
+    { id: 1, type: 'document_uploaded', description: 'Business Registration Certificate uploaded', date: '2025-04-15' },
+    { id: 2, type: 'compliance_updated', description: 'GDPR Compliance checklist updated', date: '2025-04-14' },
+    { id: 3, type: 'document_generated', description: 'Terms of Service document generated', date: '2025-04-12' },
+    { id: 4, type: 'document_uploaded', description: 'Employee Handbook uploaded', date: '2025-04-10' },
+    { id: 5, type: 'compliance_alert', description: 'Business license renewal due in 30 days', date: '2025-04-08' },
   ];
+
+  const alerts = [
+    { id: 1, title: 'Business License Renewal', description: 'Your business license expires in 30 days.', severity: 'high', date: '2025-05-15' },
+    { id: 2, title: 'Privacy Policy Update', description: 'Update your privacy policy to comply with new regulations.', severity: 'medium', date: '2025-06-01' },
+    { id: 3, type: 'tax_filing_reminder', description: 'Quarterly taxes are due soon.', severity: 'low', date: '2025-04-30' },
+  ];
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'high':
+        return 'bg-red-50 text-red-700 border-red-200';
+      case 'medium':
+        return 'bg-amber-50 text-amber-700 border-amber-200';
+      case 'low':
+        return 'bg-blue-50 text-blue-700 border-blue-200';
+      default:
+        return 'bg-gray-50 text-gray-700 border-gray-200';
+    }
+  };
+
+  // Handle tab change manually since our Tabs component doesn't support controlled mode
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+  };
+
+  // Function to handle manual refresh
+  const handleManualRefresh = () => {
+    console.log('Manual refresh triggered');
+    loadChecklists();
+  };
 
   return (
     <Layout>
       <div className="bg-beige-50 min-h-screen py-8">
         <div className="container-custom">
-          {/* Welcome header */}
-          <div className="mb-8">
-            <h1 className="text-3xl font-playfair mb-2">Welcome to Your Legal Dashboard</h1>
-            <p className="text-text-secondary">
-              Track your legal documents, compliance progress, and recent activity
-            </p>
+          {/* Welcome header with refresh button */}
+          <div className="mb-8 flex justify-between items-center">
+            <div>
+              <h1 className="text-3xl font-playfair mb-2">Welcome to Your Legal Dashboard</h1>
+              <p className="text-text-secondary">
+                Track your legal documents, compliance progress, and recent activity
+              </p>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleManualRefresh}
+              disabled={loading}
+              className="flex items-center gap-2"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh Dashboard
+            </Button>
           </div>
           
           {/* Dashboard Tabs */}
-          <Tabs defaultValue="overview" className="mb-8">
+          <Tabs defaultValue={activeTab} className="mb-8">
             <TabsList>
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="upload">Upload Documents</TabsTrigger>
-              <TabsTrigger value="compliance">Compliance</TabsTrigger>
-              <TabsTrigger value="webpresence">Website Guide</TabsTrigger>
+              <TabsTrigger value="overview" onClick={() => handleTabChange("overview")}>Overview</TabsTrigger>
+              <TabsTrigger value="upload" onClick={() => handleTabChange("upload")}>Upload Documents</TabsTrigger>
+              <TabsTrigger value="compliance" onClick={() => handleTabChange("compliance")}>Compliance</TabsTrigger>
+              <TabsTrigger value="webpresence" onClick={() => handleTabChange("webpresence")}>Website Guide</TabsTrigger>
+              
+              {/* Dynamic tabs based on checklists */}
+              {userChecklists.map(checklist => (
+                <TabsTrigger 
+                  key={checklist.id} 
+                  value={`checklist-${checklist.id}`}
+                  onClick={() => handleTabChange(`checklist-${checklist.id}`)}
+                >
+                  {checklist.name}
+                </TabsTrigger>
+              ))}
             </TabsList>
             
             {/* Overview Tab Content */}
@@ -97,51 +287,25 @@ const Dashboard: React.FC = () => {
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
-                        <p className="text-text-tertiary text-sm mb-1">Company Name</p>
+                        <h3 className="text-sm text-text-tertiary">Company Name</h3>
                         <p className="font-medium">{startupProfile.companyName || 'Not specified'}</p>
                       </div>
                       <div>
-                        <p className="text-text-tertiary text-sm mb-1">Entity Type</p>
-                        <p className="font-medium font-mono">{startupProfile.entityType || 'Not specified'}</p>
+                        <h3 className="text-sm text-text-tertiary">Entity Type</h3>
+                        <p className="font-medium">{startupProfile.entityType || 'Not specified'}</p>
                       </div>
                       <div>
-                        <p className="text-text-tertiary text-sm mb-1">Industry</p>
+                        <h3 className="text-sm text-text-tertiary">Industry</h3>
                         <p className="font-medium">{startupProfile.industry || 'Not specified'}</p>
                       </div>
                       <div>
-                        <p className="text-text-tertiary text-sm mb-1">Stage</p>
-                        <p className="font-medium">{startupProfile.stage || 'Not specified'}</p>
-                      </div>
-                      <div className="md:col-span-2">
-                        <p className="text-text-tertiary text-sm mb-1">Location</p>
+                        <h3 className="text-sm text-text-tertiary">Location</h3>
                         <p className="font-medium">{startupProfile.location || 'Not specified'}</p>
                       </div>
                     </div>
-                    
-                    <div className="mt-4 pt-4 border-t border-beige-100">
-                      <p className="text-text-tertiary text-sm mb-1">Key Concerns</p>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {startupProfile.keyConcerns && startupProfile.keyConcerns.length > 0 ? (
-                          startupProfile.keyConcerns.map((concern, i) => (
-                            <span key={i} className="px-3 py-1 bg-beige-100 text-text-secondary text-xs font-mono rounded-full">
-                              {concern}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-sm text-text-tertiary">No key concerns specified</span>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {startupProfile.goals && (
-                      <div className="mt-4 pt-4 border-t border-beige-100">
-                        <p className="text-text-tertiary text-sm mb-1">Business Goals</p>
-                        <p className="text-sm">{startupProfile.goals}</p>
-                      </div>
-                    )}
                   </motion.div>
                   
-                  {/* Documents Card */}
+                  {/* Recent Documents Card */}
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -149,43 +313,37 @@ const Dashboard: React.FC = () => {
                     className="bg-white rounded-lg shadow-custom p-6"
                   >
                     <div className="flex justify-between items-center mb-4">
-                      <h2 className="text-xl font-playfair text-teal-600">My Documents</h2>
-                      <Link to="/chat" className="text-sm text-teal-600 hover:text-teal-700">
-                        Request New Document
-                      </Link>
+                      <h2 className="text-xl font-playfair text-teal-600">Recent Documents</h2>
+                      <Link to="/upload" className="text-sm text-teal-600 hover:text-teal-700">View All</Link>
                     </div>
                     
                     <div className="space-y-4">
-                      {/* Example document items */}
-                      <div className="flex items-center justify-between p-3 bg-beige-50 rounded-lg hover:bg-beige-100 transition-colors">
-                        <div className="flex items-center">
-                          <FileText className="h-5 w-5 text-teal-600 mr-3" />
-                          <div>
-                            <p className="font-medium font-mono">NDA_Template_v1.docx</p>
-                            <p className="text-text-tertiary text-sm">Last modified: Apr 10, 2025</p>
+                      {documents.map((doc) => (
+                        <div key={doc.id} className="flex items-center justify-between p-3 bg-beige-50 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <FileText className="h-5 w-5 text-teal-600" />
+                            <div>
+                              <p className="font-medium">{doc.name}</p>
+                              <p className="text-xs text-text-tertiary">{doc.type} • {doc.date}</p>
+                            </div>
                           </div>
+                          <Button variant="ghost" size="sm">
+                            <Download className="h-4 w-4 mr-1" />
+                            Download
+                          </Button>
                         </div>
-                        <button className="text-teal-600 hover:text-teal-700">
-                          <Download size={18} />
-                        </button>
-                      </div>
+                      ))}
                       
-                      <div className="flex items-center justify-between p-3 bg-beige-50 rounded-lg hover:bg-beige-100 transition-colors">
-                        <div className="flex items-center">
-                          <FileText className="h-5 w-5 text-teal-600 mr-3" />
-                          <div>
-                            <p className="font-medium font-mono">Terms_of_Service_2025.pdf</p>
-                            <p className="text-text-tertiary text-sm">Last modified: Apr 8, 2025</p>
-                          </div>
-                        </div>
-                        <button className="text-teal-600 hover:text-teal-700">
-                          <Download size={18} />
-                        </button>
-                      </div>
+                      <Button variant="outline" className="w-full" asChild>
+                        <Link to="/upload">
+                          <Upload className="h-4 w-4 mr-2" />
+                          Upload New Document
+                        </Link>
+                      </Button>
                     </div>
                   </motion.div>
                   
-                  {/* Compliance Alerts */}
+                  {/* Recent Activity Card */}
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -193,139 +351,126 @@ const Dashboard: React.FC = () => {
                     className="bg-white rounded-lg shadow-custom p-6"
                   >
                     <div className="flex justify-between items-center mb-4">
-                      <h2 className="text-xl font-playfair text-teal-600">Compliance Alerts</h2>
-                      <span className="px-3 py-1 bg-beige-100 text-text-secondary text-xs rounded-full">
-                        2 Pending
-                      </span>
+                      <h2 className="text-xl font-playfair text-teal-600">Recent Activity</h2>
                     </div>
                     
                     <div className="space-y-4">
-                      <div className="flex items-start p-3 bg-beige-50 rounded-md border-l-4 border-amber-500">
-                        <AlertCircle size={20} className="text-amber-500 mr-3 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <p className="font-medium">GDPR Compliance Deadline Approaching</p>
-                          <p className="text-text-secondary text-sm mt-1">
-                            Complete your GDPR compliance checklist by May 15, 2025
-                          </p>
-                          <div className="mt-2">
-                            <Link to="/chat" className="text-teal-600 hover:underline text-sm">
-                              Review Checklist
-                            </Link>
+                      {recentActivity.map((activity) => (
+                        <div key={activity.id} className="flex items-start gap-3 pb-3 border-b last:border-0">
+                          <div className="mt-0.5">
+                            {activity.type === 'document_uploaded' && <Upload className="h-4 w-4 text-teal-600" />}
+                            {activity.type === 'compliance_updated' && <CheckSquare className="h-4 w-4 text-teal-600" />}
+                            {activity.type === 'document_generated' && <FileText className="h-4 w-4 text-teal-600" />}
+                            {activity.type === 'compliance_alert' && <AlertCircle className="h-4 w-4 text-amber-500" />}
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm">{activity.description}</p>
+                            <p className="text-xs text-text-tertiary">{activity.date}</p>
                           </div>
                         </div>
-                      </div>
-                      
-                      <div className="flex items-start p-3 bg-beige-50 rounded-md border-l-4 border-teal-600">
-                        <Clock size={20} className="text-teal-600 mr-3 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <p className="font-medium">Annual Report Filing Reminder</p>
-                          <p className="text-text-secondary text-sm mt-1">
-                            Your annual report filing is due in 45 days
-                          </p>
-                          <div className="mt-2">
-                            <Link to="/chat" className="text-teal-600 hover:underline text-sm">
-                              Get Assistance
-                            </Link>
-                          </div>
-                        </div>
-                      </div>
+                      ))}
                     </div>
                   </motion.div>
                 </div>
                 
-                {/* Right column - Checklists & Activity */}
+                {/* Right column - Alerts & Compliance */}
                 <div className="space-y-8">
-                  {/* Compliance Checklists */}
+                  {/* Compliance Alerts Card */}
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4, delay: 0.3 }}
                     className="bg-white rounded-lg shadow-custom p-6"
                   >
-                    <div className="flex justify-between items-center mb-4">
-                      <h2 className="text-xl font-playfair text-teal-600">Compliance Checklists</h2>
-                      <Link to="/chat" className="text-sm text-teal-600 hover:text-teal-700">
-                        Create New
-                      </Link>
-                    </div>
+                    <h2 className="text-xl font-playfair text-teal-600 mb-4">Compliance Alerts</h2>
                     
-                    <div className="space-y-6">
-                      {checklists.map((checklist) => (
-                        <div key={checklist.id} className="border border-beige-200 rounded-md p-4">
-                          <div className="flex justify-between items-center mb-2">
-                            <h3 className="font-medium">{checklist.name}</h3>
-                            <span className="text-sm text-text-secondary">
-                              {checklist.progress}% Complete
-                            </span>
+                    <div className="space-y-4">
+                      {alerts.map((alert) => (
+                        <div 
+                          key={alert.id} 
+                          className={`p-3 rounded-lg border-l-4 ${getSeverityColor(alert.severity)}`}
+                        >
+                          <div className="flex justify-between items-start">
+                            <h3 className="font-medium">{alert.title}</h3>
+                            <Badge variant="outline" className={getSeverityColor(alert.severity)}>
+                              {alert.severity.charAt(0).toUpperCase() + alert.severity.slice(1)}
+                            </Badge>
                           </div>
-                          
-                          <div className="w-full bg-beige-100 rounded-full h-2 mb-4">
-                            <div 
-                              className="bg-teal-600 h-2 rounded-full" 
-                              style={{ width: `${checklist.progress}%` }}
-                            ></div>
+                          <p className="text-sm text-text-secondary mt-1">{alert.description}</p>
+                          <div className="flex items-center gap-1 mt-2 text-xs text-text-tertiary">
+                            <Clock className="h-3 w-3" />
+                            <span>Due by {alert.date}</span>
                           </div>
-                          
-                          <div className="space-y-2 max-h-40 overflow-y-auto">
-                            {checklist.items.slice(0, 3).map((item) => (
-                              <div key={item.id} className="flex items-center">
-                                <div className={`w-4 h-4 rounded-sm mr-2 flex items-center justify-center ${
-                                  item.completed ? 'bg-teal-600' : 'border border-beige-300'
-                                }`}>
-                                  {item.completed && (
-                                    <CheckSquare size={12} className="text-white" />
-                                  )}
-                                </div>
-                                <span className={`text-sm ${
-                                  item.completed ? 'text-text-tertiary line-through' : 'text-text-primary'
-                                }`}>
-                                  {item.text}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                          
-                          {checklist.items.length > 3 && (
-                            <button className="mt-3 text-teal-600 hover:underline text-sm">
-                              View all {checklist.items.length} items
-                            </button>
-                          )}
                         </div>
                       ))}
                     </div>
                   </motion.div>
                   
-                  {/* Recent Activity */}
+                  {/* Compliance Progress Card */}
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4, delay: 0.4 }}
                     className="bg-white rounded-lg shadow-custom p-6"
                   >
-                    <h2 className="text-xl font-playfair text-teal-600 mb-4">Recent Activity</h2>
-                    
-                    <div className="space-y-4">
-                      {recentActivity.map((activity) => (
-                        <div key={activity.id} className="flex items-start pb-4 border-b border-beige-100 last:border-0 last:pb-0">
-                          <div className="w-10 h-10 rounded-full bg-beige-100 flex items-center justify-center mr-3 flex-shrink-0">
-                            {activity.type === 'document' && <FileText size={18} className="text-teal-600" />}
-                            {activity.type === 'checklist' && <CheckSquare size={18} className="text-teal-600" />}
-                            {activity.type === 'chat' && <ExternalLink size={18} className="text-teal-600" />}
-                          </div>
-                          <div>
-                            <p className="font-medium font-mono">{activity.text}</p>
-                            <p className="text-text-tertiary text-sm">
-                              {new Date(activity.date).toLocaleDateString()}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-xl font-playfair text-teal-600">Compliance Progress</h2>
+                      <Link to="/dashboard?tab=compliance" className="text-sm text-teal-600 hover:text-teal-700">View Details</Link>
                     </div>
                     
-                    <div className="mt-4 pt-4 border-t border-beige-100 text-center">
-                      <Link to="/chat" className="text-teal-600 hover:underline text-sm">
-                        Continue the conversation
-                      </Link>
+                    {userChecklists.length > 0 ? (
+                      <div className="space-y-4">
+                        {userChecklists.slice(0, 3).map((checklist) => (
+                          <div key={checklist.id} className="flex flex-col gap-1">
+                            <div className="flex justify-between items-center">
+                              <h3 className="text-sm font-medium">{checklist.name}</h3>
+                              <span className="text-xs text-text-tertiary">{checklist.progress}%</span>
+                            </div>
+                            <div className="w-full bg-beige-100 rounded-full h-2">
+                              <div 
+                                className="bg-teal-600 h-2 rounded-full" 
+                                style={{ width: `${checklist.progress}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        ))}
+                        
+                        {userChecklists.length > 3 && (
+                          <Button variant="link" className="text-sm p-0 h-auto">
+                            View {userChecklists.length - 3} more checklists
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-4 text-text-tertiary">
+                        <p>No checklists available</p>
+                        <p className="text-xs mt-1">Generate guidance in chat to create checklists</p>
+                      </div>
+                    )}
+                  </motion.div>
+                  
+                  {/* Legal Resources Card */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: 0.5 }}
+                    className="bg-white rounded-lg shadow-custom p-6"
+                  >
+                    <h2 className="text-xl font-playfair text-teal-600 mb-4">Legal Resources</h2>
+                    
+                    <div className="space-y-3">
+                      <a href="#" className="flex items-center gap-2 p-2 hover:bg-beige-50 rounded-md transition-colors">
+                        <ExternalLink className="h-4 w-4 text-teal-600" />
+                        <span className="text-sm">Small Business Administration</span>
+                      </a>
+                      <a href="#" className="flex items-center gap-2 p-2 hover:bg-beige-50 rounded-md transition-colors">
+                        <ExternalLink className="h-4 w-4 text-teal-600" />
+                        <span className="text-sm">Chamber of Commerce</span>
+                      </a>
+                      <a href="#" className="flex items-center gap-2 p-2 hover:bg-beige-50 rounded-md transition-colors">
+                        <ExternalLink className="h-4 w-4 text-teal-600" />
+                        <span className="text-sm">Legal Templates Library</span>
+                      </a>
                     </div>
                   </motion.div>
                   
@@ -357,6 +502,13 @@ const Dashboard: React.FC = () => {
             <TabsContent value="webpresence">
               <WebPresenceTab />
             </TabsContent>
+            
+            {/* Dynamic Checklist Tabs Content */}
+            {userChecklists.map(checklist => (
+              <TabsContent key={checklist.id} value={`checklist-${checklist.id}`}>
+                <ChecklistTab checklist={checklist} />
+              </TabsContent>
+            ))}
           </Tabs>
           
         </div>

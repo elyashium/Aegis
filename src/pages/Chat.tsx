@@ -17,6 +17,7 @@ import {
   type Message as SupabaseMessage, 
   type Conversation as SupabaseConversation 
 } from '../utils/chatStorage';
+import AbsorbGuidanceButton from '../components/AbsorbGuidanceButton';
 
 // API endpoint - Using proxy to avoid CORS issues
 const API_BASE_URL = "/api";
@@ -107,6 +108,17 @@ const messageFromSupabase = (message: SupabaseMessage): Message => ({
   timestamp: message.timestamp,
   attachments: message.attachments
 });
+
+// Add this helper function to detect if a message is a comprehensive guidance
+const isComprehensiveGuidance = (content: string): boolean => {
+  // Check if the message contains characteristic structure of comprehensive guidance
+  // Look for patterns like "Step X: " and "Actionable Steps:" which occur in RAG guidance
+  return (
+    content.includes('Step 1:') && 
+    (content.includes('Actionable Steps:') || content.includes('Compliance Dashboard Checklist')) &&
+    content.length > 1000 // Ensure it's a substantial response
+  );
+};
 
 const Chat: React.FC = () => {
   const { user } = useAuth();
@@ -782,6 +794,31 @@ const Chat: React.FC = () => {
                           __html: formatMessageContent(message.content) + (message.isStreaming ? `<span class="${chatStyles.typingIndicator}">|</span>` : '') 
                         }} 
                       />
+                      
+                      {/* Add AbsorbGuidanceButton for comprehensive guidance */}
+                      {message.sender === 'assistant' && 
+                        !message.isStreaming && 
+                        !message.isError && 
+                        isComprehensiveGuidance(message.content) && (
+                          <>
+                            <button 
+                              onClick={() => console.log('RAG MARKDOWN TO PARSE:\n', JSON.stringify(message.content))}
+                              className="my-2 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                            >
+                              Log RAG Markdown for Debugging
+                            </button>
+                            
+                            <AbsorbGuidanceButton
+                              ragMarkdown={message.content}
+                              onSuccess={() => {
+                                console.log('Guidance absorbed successfully');
+                              }}
+                              onError={(error) => {
+                                console.error('Error absorbing guidance:', error);
+                              }}
+                            />
+                          </>
+                        )}
                       
                       {/* Example of document generation result */}
                       {message.sender === 'assistant' && message.content.includes('generate a draft') && (

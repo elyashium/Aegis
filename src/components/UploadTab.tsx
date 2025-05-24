@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { FileText, Upload, X, Download } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { FileText, Upload, X, Download, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
@@ -7,12 +7,63 @@ import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Progress } from './ui/progress';
 import { Separator } from './ui/separator';
+import { useAuth } from '../contexts/AuthContext';
+import { fetchDocumentsForUser, Document as DocType } from '../utils/dashboardUtils';
+import { useLocation } from 'react-router-dom';
 
 const UploadTab: React.FC = () => {
+  const { user } = useAuth();
   const [files, setFiles] = useState<File[]>([]);
   const [documentType, setDocumentType] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [requiredDocuments, setRequiredDocuments] = useState<DocType[]>([]);
+  const [recentDocuments, setRecentDocuments] = useState<DocType[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const location = useLocation();
+
+  // Fetch documents from Supabase
+  const loadDocuments = async () => {
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      console.log('Loading documents for user...');
+      const docs = await fetchDocumentsForUser(user.id);
+      
+      // Separate required documents (without file_path) from uploaded documents (with file_path)
+      const required = docs.filter(doc => doc.file_path === null);
+      const uploaded = docs.filter(doc => doc.file_path !== null);
+      
+      console.log(`Loaded ${required.length} required documents and ${uploaded.length} uploaded documents`);
+      
+      setRequiredDocuments(required);
+      setRecentDocuments(uploaded);
+    } catch (err: any) {
+      console.error('Error loading documents:', err);
+      setError(err.message || 'Failed to load documents');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDocuments();
+  }, [user]);
+
+  // Check for refresh signal from location state
+  useEffect(() => {
+    if (location.state?.refreshChecklists) {
+      console.log('UploadTab detected refresh signal');
+      loadDocuments();
+    }
+  }, [location.state]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -47,16 +98,46 @@ const UploadTab: React.FC = () => {
     }, 300);
   };
 
-  const recentDocuments = [
-    { name: "Business Registration.pdf", type: "Business License", date: "May 15, 2025", size: "1.2 MB" },
-    { name: "Employee Handbook.docx", type: "Labor Compliance", date: "May 10, 2025", size: "3.5 MB" },
-    { name: "Food Handler Certificate.pdf", type: "Industry Specific", date: "May 5, 2025", size: "0.8 MB" },
-    { name: "Tax Registration.pdf", type: "Business License", date: "April 28, 2025", size: "1.5 MB" },
-    { name: "Emergency Plan.pdf", type: "Safety Compliance", date: "April 20, 2025", size: "2.1 MB" },
-  ];
+  // Group required documents by type
+  const groupedRequiredDocs = requiredDocuments.reduce<Record<string, DocType[]>>((acc, doc) => {
+    const type = doc.document_type || 'Other';
+    if (!acc[type]) acc[type] = [];
+    acc[type].push(doc);
+    return acc;
+  }, {});
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-full py-10">
+        <div className="w-8 h-8 border-4 border-teal-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="ml-2 text-text-secondary">Loading documents...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-10 text-red-600">
+        <AlertTriangle className="h-8 w-8 mx-auto mb-2" />
+        <p>Error: {error}</p>
+        <Button onClick={loadDocuments} className="mt-4 flex items-center gap-2">
+          <RefreshCw className="h-4 w-4" />
+          Try Again
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-playfair text-teal-600">Document Management</h2>
+        <Button variant="outline" size="sm" onClick={loadDocuments} className="flex items-center gap-2">
+          <RefreshCw className="h-4 w-4" />
+          Refresh Documents
+        </Button>
+      </div>
+      
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -142,64 +223,37 @@ const UploadTab: React.FC = () => {
 
         <Card>
           <CardHeader>
-            <CardTitle>Document Requirements</CardTitle>
-            <CardDescription>Required documents based on your business profile</CardDescription>
+            <CardTitle>Required Documents</CardTitle>
+            <CardDescription>Documents needed based on your guidance</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="p-3 border rounded-md">
-                <h3 className="font-medium mb-1">Business Licenses & Permits</h3>
-                <ul className="space-y-2 text-sm">
-                  <li className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-text-tertiary" />
-                    <span>Business Registration Certificate</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-text-tertiary" />
-                    <span>Seller's Permit</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-text-tertiary" />
-                    <span>Health Department Permit</span>
-                  </li>
-                </ul>
-              </div>
-
-              <div className="p-3 border rounded-md">
-                <h3 className="font-medium mb-1">Safety & Health Compliance</h3>
-                <ul className="space-y-2 text-sm">
-                  <li className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-text-tertiary" />
-                    <span>Emergency Action Plan</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-text-tertiary" />
-                    <span>OSHA Compliance Documentation</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-text-tertiary" />
-                    <span>Safety Training Records</span>
-                  </li>
-                </ul>
-              </div>
-
-              <div className="p-3 border rounded-md">
-                <h3 className="font-medium mb-1">Industry-Specific Requirements</h3>
-                <ul className="space-y-2 text-sm">
-                  <li className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-text-tertiary" />
-                    <span>Food Handler Certification</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-text-tertiary" />
-                    <span>Alcohol License</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-text-tertiary" />
-                    <span>Product Safety Certification</span>
-                  </li>
-                </ul>
-              </div>
+              {Object.keys(groupedRequiredDocs).length > 0 ? (
+                Object.entries(groupedRequiredDocs).map(([type, docs], index) => (
+                  <div key={index} className="p-3 border rounded-md">
+                    <h3 className="font-medium mb-1">{type}</h3>
+                    <ul className="space-y-2 text-sm">
+                      {docs.map((doc) => (
+                        <li key={doc.id} className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-text-tertiary" />
+                          <span>{doc.name}</span>
+                          {doc.metadata && doc.metadata.status && (
+                            <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full">
+                              {doc.metadata.status}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-6 text-text-tertiary">
+                  <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No required documents found</p>
+                  <p className="text-sm mt-1">Generate guidance in chat to see required documents</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -212,37 +266,43 @@ const UploadTab: React.FC = () => {
             <CardDescription>View and manage your previously uploaded documents</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-1">
-              {recentDocuments.map((doc, index) => (
-                <div key={index}>
-                  <div className="flex items-center justify-between py-3">
-                    <div className="flex items-center gap-3">
-                      <FileText className="h-5 w-5 text-text-tertiary" />
-                      <div>
-                        <p className="font-medium">{doc.name}</p>
-                        <div className="flex items-center gap-2 text-xs text-text-tertiary">
-                          <span>{doc.type}</span>
-                          <Separator orientation="vertical" className="h-3" />
-                          <span>Uploaded: {doc.date}</span>
-                          <Separator orientation="vertical" className="h-3" />
-                          <span>{doc.size}</span>
+            {recentDocuments.length > 0 ? (
+              <div className="space-y-1">
+                {recentDocuments.map((doc, index) => (
+                  <div key={doc.id}>
+                    <div className="flex items-center justify-between py-3">
+                      <div className="flex items-center gap-3">
+                        <FileText className="h-5 w-5 text-text-tertiary" />
+                        <div>
+                          <p className="font-medium">{doc.name}</p>
+                          <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                            <span>{doc.document_type}</span>
+                            <Separator orientation="vertical" className="h-3" />
+                            <span>Uploaded: {new Date(doc.upload_date).toLocaleDateString()}</span>
+                          </div>
                         </div>
                       </div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm">
+                          View
+                        </Button>
+                        <Button variant="ghost" size="sm">
+                          <Download className="h-4 w-4 mr-1" />
+                          Download
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm">
-                        View
-                      </Button>
-                      <Button variant="ghost" size="sm">
-                        <Download className="h-4 w-4 mr-1" />
-                        Download
-                      </Button>
-                    </div>
+                    {index < recentDocuments.length - 1 && <Separator />}
                   </div>
-                  {index < recentDocuments.length - 1 && <Separator />}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-6 text-text-tertiary">
+                <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No uploaded documents yet</p>
+                <p className="text-sm mt-1">Upload documents using the form above</p>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

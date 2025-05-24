@@ -1,168 +1,186 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
-import { CheckCircle2, Clock, Download, FileText, Upload } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { CheckCircle2, Clock, Download, FileText, Upload, AlertTriangle, RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Checkbox } from './ui/checkbox';
 import { Label } from './ui/label';
 import { Separator } from './ui/separator';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  type Checklist, 
+  type ChecklistItem, 
+  fetchChecklistByName, 
+  fetchChecklistItemsForChecklist, 
+  updateChecklistItemCompletion,
+  updateChecklistProgress,
+  fetchChecklistsForUser
+} from '../utils/dashboardUtils';
+
+interface ComplianceItem extends ChecklistItem {
+  // Add any specific fields if needed for compliance display
+}
 
 const ComplianceTab: React.FC = () => {
-  const categories = [
-    {
-      id: "business-licenses",
-      title: "Business Licenses & Permits",
-      items: [
-        { id: "business-reg", name: "Business Registration", status: "complete", hasDocument: true },
-        { id: "seller-permit", name: "Seller's Permit", status: "complete", hasDocument: true },
-        { id: "health-permit", name: "Health Department Permit", status: "in-progress", hasDocument: false },
-        { id: "fire-safety", name: "Fire Safety Inspection", status: "pending", hasDocument: false },
-      ],
-    },
-    {
-      id: "safety-compliance",
-      title: "Safety & Health Compliance",
-      items: [
-        { id: "emergency-plan", name: "Emergency Action Plan", status: "complete", hasDocument: true },
-        { id: "osha-checklist", name: "OSHA Compliance Checklist", status: "in-progress", hasDocument: false },
-        { id: "safety-training", name: "Safety Training Documentation", status: "in-progress", hasDocument: false },
-        { id: "hazard-comm", name: "Hazard Communication Program", status: "pending", hasDocument: false },
-      ],
-    },
-    {
-      id: "labor-compliance",
-      title: "Labor Law Compliance",
-      items: [
-        { id: "employee-handbook", name: "Employee Handbook", status: "complete", hasDocument: true },
-        { id: "labor-posters", name: "Labor Law Posters", status: "complete", hasDocument: true },
-        { id: "payroll-tax", name: "Payroll Tax Registration", status: "complete", hasDocument: true },
-        { id: "workers-comp", name: "Workers' Compensation Insurance", status: "in-progress", hasDocument: false },
-      ],
-    },
-    {
-      id: "industry-specific",
-      title: "Industry-Specific Requirements",
-      items: [
-        { id: "food-handler", name: "Food Handler Certification", status: "complete", hasDocument: true },
-        { id: "alcohol-license", name: "Alcohol License", status: "in-progress", hasDocument: false },
-        { id: "product-safety", name: "Product Safety Certification", status: "pending", hasDocument: false },
-        { id: "environmental", name: "Environmental Compliance", status: "pending", hasDocument: false },
-      ],
-    },
-  ];
+  const { user } = useAuth();
+  const [complianceChecklists, setComplianceChecklists] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const location = useLocation();
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "complete":
-        return (
-          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-            Complete
-          </Badge>
+  useEffect(() => {
+    const loadComplianceData = async () => {
+      if (!user) return;
+      
+      try {
+        // Fetch all checklists for this user
+        const allChecklists = await fetchChecklistsForUser(user.id);
+        
+        // Filter to find compliance-related checklists
+        const complianceRelatedChecklists = allChecklists.filter(checklist => 
+          checklist.name === 'Compliance Dashboard' ||
+          checklist.name.toLowerCase().includes('compliance') ||
+          checklist.name.toLowerCase().includes('legal requirement')
         );
-      case "in-progress":
-        return (
-          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
-            In Progress
-          </Badge>
+        
+        console.log('Found compliance checklists:', complianceRelatedChecklists);
+        
+        // For each compliance checklist, fetch its items
+        const checklistsWithItems = await Promise.all(
+          complianceRelatedChecklists.map(async (checklist) => {
+            const items = await fetchChecklistItemsForChecklist(checklist.id);
+            return { 
+              checklist,
+              items: items || []
+            };
+          })
         );
-      case "pending":
-        return (
-          <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-            Required
-          </Badge>
-        );
-      default:
-        return null;
+        
+        setComplianceChecklists(checklistsWithItems);
+      } catch (err: any) {
+        console.error('Error loading compliance data:', err);
+        setError(err.message || 'Failed to load compliance data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadComplianceData();
+  }, [user]);
+
+  // Check for refresh signal from location state
+  useEffect(() => {
+    if (location.state?.refreshChecklists) {
+      console.log('ComplianceTab detected refresh signal');
+      loadComplianceData();
+    }
+  }, [location.state]);
+
+  const handleCheckboxChange = async (itemId: string, checked: boolean) => {
+    try {
+      await updateChecklistItemCompletion(itemId, checked);
+      
+      // Update the local state
+      setComplianceChecklists(prev => 
+        prev.map(checklistData => ({
+          checklist: checklistData.checklist,
+          items: checklistData.items.map(item => 
+            item.id === itemId ? { ...item, completed: checked } : item
+          )
+        }))
+      );
+    } catch (err) {
+      console.error('Error updating checklist item:', err);
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "complete":
-        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-      case "in-progress":
-      case "pending":
-        return <Clock className="h-4 w-4 text-amber-500" />;
-      default:
-        return null;
-    }
+  const getStatusBadge = (completed: boolean) => {
+    return completed ? (
+      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+        Complete
+      </Badge>
+    ) : (
+      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+        Pending
+      </Badge>
+    );
   };
+
+  const getStatusIcon = (completed: boolean) => {
+    return completed ? (
+      <CheckCircle2 className="h-4 w-4 text-green-500" />
+    ) : (
+      <Clock className="h-4 w-4 text-amber-500" />
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-10">
+        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+        <span className="ml-2">Loading compliance checklists...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-10 text-red-600">
+        <AlertCircle className="h-8 w-8 mx-auto mb-2" />
+        <p>Error: {error}</p>
+      </div>
+    );
+  }
+
+  if (complianceChecklists.length === 0) {
+    return (
+      <div className="text-center py-10 text-text-secondary">
+        <p>No compliance checklists found.</p>
+        <p className="text-sm mt-2">Generate legal guidance in chat to create compliance checklists.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-playfair text-teal-600">Compliance Requirements</h2>
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/upload">
-            <Upload className="h-4 w-4 mr-2" />
-            Upload Documents
-          </Link>
-        </Button>
-      </div>
+    <div className="space-y-8">
+      <p className="text-text-secondary mb-6">
+        Track your compliance progress across various legal and regulatory requirements.
+      </p>
 
-      <div className="space-y-6">
-        {categories.map((category) => (
-          <Card key={category.id}>
-            <CardHeader className="pb-3">
-              <CardTitle>{category.title}</CardTitle>
-              <CardDescription>
-                {category.items.filter((item) => item.status === "complete").length} of {category.items.length}{" "}
-                requirements completed
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {category.items.map((item) => (
-                  <div key={item.id} className="flex items-start justify-between py-2 border-b last:border-0">
-                    <div className="flex items-start gap-3">
-                      <Checkbox id={item.id} checked={item.status === "complete"} />
-                      <div>
-                        <Label htmlFor={item.id} className="font-medium cursor-pointer">
-                          {item.name}
-                        </Label>
-                        <div className="flex items-center gap-2 mt-1">
-                          {getStatusIcon(item.status)}
-                          <span className="text-xs text-text-tertiary">
-                            {item.status === "complete"
-                              ? "Completed"
-                              : item.status === "in-progress"
-                                ? "In progress"
-                                : "Required"}
-                          </span>
-                          {item.hasDocument && (
-                            <>
-                              <Separator orientation="vertical" className="h-3" />
-                              <span className="text-xs text-text-tertiary flex items-center">
-                                <FileText className="h-3 w-3 mr-1" />
-                                Document uploaded
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {getStatusBadge(item.status)}
-                      {item.hasDocument ? (
-                        <Button variant="ghost" size="icon" title="Download Document">
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      ) : (
-                        <Button variant="ghost" size="icon" title="Upload Document" asChild>
-                          <Link to="/upload">
-                            <Upload className="h-4 w-4" />
-                          </Link>
-                        </Button>
-                      )}
+      {complianceChecklists.map((checklistData) => (
+        <Card key={checklistData.checklist.id} className="mb-6">
+          <CardHeader>
+            <CardTitle>{checklistData.checklist.name}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {checklistData.items.length === 0 ? (
+                <p className="text-text-tertiary py-2">No items in this checklist</p>
+              ) : (
+                checklistData.items.map((item) => (
+                  <div key={item.id} className="flex items-start space-x-3 py-3 border-b border-beige-100 last:border-0">
+                    <Checkbox 
+                      id={item.id}
+                      checked={item.completed}
+                      onCheckedChange={(checked) => handleCheckboxChange(item.id, Boolean(checked))}
+                      className="mt-1"
+                    />
+                    <div>
+                      <Label 
+                        htmlFor={item.id}
+                        className={`font-medium ${item.completed ? 'line-through text-text-tertiary' : ''}`}
+                      >
+                        {item.text}
+                      </Label>
                     </div>
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 };
