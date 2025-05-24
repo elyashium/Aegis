@@ -1,0 +1,30 @@
+{
+    "original_query": "How do I set up a SaaS for legal advising in India?",
+    "dashboard_state": {
+      "mainComplianceChecklist": [
+        {"task": "Choose a business structure and register your entity.", "completed": true},
+        {"task": "Draft service agreements and pay stamp duty.", "completed": false}
+      ],
+      "dynamicTabs": [
+        {
+          "tabTitle": "Step 1: Choose the Appropriate Business Structure",
+          "checklistItems": [
+            {"item": "Research the pros and cons of each structure.", "completed": true},
+            {"item": "Prepare necessary documents for registration.", "completed": true},
+            {"item": "Consult a Company Secretary.", "completed": false}
+          ],
+          "documents": [
+            {"name": "PAN card (document)", "status": "Uploaded"},
+            {"name": "address proof (document)", "status": "Pending"}
+          ]
+        },
+        {
+          "tabTitle": "Step 2: Regulatory Compliance for SaaS Businesses",
+          "checklistItems": [
+            {"item": "Familiarize with Data Protection Act.", "completed": false}
+          ],
+          "documents": []
+        }
+      ]
+    }
+  }
