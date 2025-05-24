@@ -23,6 +23,7 @@ interface OnboardingState {
   startupProfile: StartupProfile;
   onboardingStep: number;
   dashboardCreated: boolean;
+  isLoading: boolean;
 }
 
 // Context properties
@@ -46,6 +47,7 @@ const initialState: OnboardingState = {
   startupProfile: {},
   onboardingStep: 0,
   dashboardCreated: false,
+  isLoading: true,
 };
 
 // Create context
@@ -69,41 +71,63 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     const loadOnboardingState = async () => {
       if (!user) {
-        setOnboardingState(initialState);
+        setOnboardingState({...initialState, isLoading: false});
         return;
       }
 
       try {
+        console.log('Loading onboarding state for user:', user.id);
+        setOnboardingState(prev => ({...prev, isLoading: true}));
+        
         const { data, error } = await supabase
           .from('user_profiles')
           .select('*')
           .eq('user_id', user.id)
           .single();
 
-        if (error && error.code !== 'PGRST116') { // PGRST116 = not found
-          console.error('Error loading onboarding state:', error);
+        if (error) {
+          if (error.code === 'PGRST116') { // Not found
+            console.log('No user profile found, user needs onboarding');
+            // Create a new profile entry but don't mark as onboarded yet
+            await supabase.from('user_profiles').insert({
+              user_id: user.id,
+              is_onboarded: false,
+              dashboard_created: false,
+              created_at: new Date().toISOString()
+            });
+            setOnboardingState({
+              ...initialState,
+              isLoading: false
+            });
+          } else {
+            console.error('Error loading onboarding state:', error);
+            setOnboardingState(prev => ({...prev, isLoading: false}));
+          }
           return;
         }
 
         if (data) {
+          console.log('User profile found:', data);
           setOnboardingState({
             isOnboarded: data.is_onboarded || false,
             userType: data.user_type as UserType,
             startupProfile: {
-              companyName: data.company_name,
-              entityType: data.entity_type,
-              industry: data.industry,
-              location: data.location,
-              stage: data.stage,
-              keyConcerns: data.key_concerns,
-              goals: data.goals,
+              companyName: data.company_name || '',
+              entityType: data.entity_type || '',
+              industry: data.industry || '',
+              location: data.location || '',
+              stage: data.stage || '',
+              keyConcerns: data.key_concerns || [],
+              goals: data.goals || '',
             },
             onboardingStep: 0, // Reset step when loading
             dashboardCreated: data.dashboard_created || false,
+            isLoading: false,
           });
         }
       } catch (error) {
         console.error('Unexpected error loading onboarding state:', error);
+        setOnboardingState(prev => ({...prev, isLoading: false}));
       }
     };
 
@@ -140,7 +164,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Reset onboarding
   const resetOnboarding = () => {
-    setOnboardingState(initialState);
+    setOnboardingState({...initialState, isLoading: false});
   };
 
   // Mark onboarding as complete and save to database
@@ -148,6 +172,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (!user) return;
 
     try {
+      console.log('Completing onboarding for user:', user.id);
       const { error } = await supabase
         .from('user_profiles')
         .upsert({
@@ -162,6 +187,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           key_concerns: onboardingState.startupProfile.keyConcerns,
           goals: onboardingState.startupProfile.goals,
           dashboard_created: onboardingState.dashboardCreated,
+          updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' });
 
       if (error) {
@@ -170,6 +196,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       setOnboardingState(prev => ({ ...prev, isOnboarded: true }));
+      console.log('Onboarding completed successfully');
     } catch (error) {
       console.error('Unexpected error completing onboarding:', error);
     }
@@ -180,13 +207,17 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (!user) return;
 
     try {
+      console.log('Creating dashboard for user:', user.id);
       // Here we would call the API endpoint to generate dashboard content
       // This is a placeholder for the actual API call
       
       // Mark dashboard as created
       const { error } = await supabase
         .from('user_profiles')
-        .update({ dashboard_created: true })
+        .update({ 
+          dashboard_created: true,
+          updated_at: new Date().toISOString()
+        })
         .eq('user_id', user.id);
 
       if (error) {
@@ -195,6 +226,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       setOnboardingState(prev => ({ ...prev, dashboardCreated: true }));
+      console.log('Dashboard created successfully');
     } catch (error) {
       console.error('Unexpected error creating dashboard:', error);
     }
