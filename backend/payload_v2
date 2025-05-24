@@ -1,0 +1,88 @@
+{
+  "current_dashboard_data": {
+    "user_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
+    "initial_user_query": "Help me set up my new e-commerce tech startup in India, focusing on legal compliance.",
+    "checklists": [
+      {
+        "id": "cl_uuid_1111",
+        "name": "Business Registration",
+        "items": [
+          {
+            "id": "item_uuid_br_001",
+            "text": "Research Private Limited vs. LLP",
+            "completed": true
+          },
+          {
+            "id": "item_uuid_br_002",
+            "text": "Prepare Director Identification Number (DIN) application",
+            "completed": true
+          },
+          {
+            "id": "item_uuid_br_003",
+            "text": "Draft Memorandum of Association (MOA)",
+            "completed": false
+          },
+          {
+            "text": "File for company incorporation (SPICe+ form)",
+            "completed": false
+          }
+        ],
+        "progress": 50
+      },
+      {
+        "id": "cl_uuid_2222",
+        "name": "Initial IP Protection",
+        "items": [
+          {
+            "id": "item_uuid_ip_001",
+            "text": "Conduct trademark search for brand name",
+            "completed": true
+          },
+          {
+            "text": "File trademark application",
+            "completed": false
+          }
+        ],
+        "progress": 33
+      },
+      {
+        "name": "Website Legal Pages",
+        "items": [
+          {"text": "Draft Privacy Policy", "completed": false},
+          {"text": "Draft Terms of Service", "completed": false}
+        ],
+        "progress": 0
+      }
+    ],
+    "documents": [
+      {
+        "id": "doc_uuid_aaa",
+        "name": "Director KYC Documents",
+        "document_type": "Registration",
+        "status": "Uploaded"
+      },
+      {
+        "name": "Draft MOA v1.pdf",
+        "document_type": "Registration",
+        "status": "Uploaded"
+      },
+      {
+        "name": "Brand Logo Trademark Search Report.pdf",
+        "document_type": "Intellectual Property",
+        "status": "Uploaded",
+        "file_path": "/user_uploads/doc_uuid_bbb/search_report.pdf"
+      }
+    ],
+    "compliance_alerts": [
+      {
+        "id": "alert_uuid_777",
+        "title": "GST Registration Deadline Approaching",
+        "description": "Consider registering for GST if turnover is expected to exceed threshold.",
+        "due_date": "2024-08-15",
+        "status": "pending",
+        "severity": "medium"
+      }
+    ]
+  },
+  "update_prompt": "I've just uploaded the draft MOA and completed the DIN application. What should I focus on next for business registration, and can you create a checklist for basic tax registrations I'll need soon?"
+}
