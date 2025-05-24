@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { FileText, CheckSquare, AlertCircle, Clock, Download, ExternalLink, Loader2, Upload, RefreshCw } from 'lucide-react';
+import { FileText, CheckSquare, AlertCircle, Clock, Download, ExternalLink, Loader2, Upload, RefreshCw, Trash2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { useOnboarding } from '../contexts/OnboardingContext';
@@ -9,12 +9,35 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import UploadTab from '../components/UploadTab';
 import ComplianceTab from '../components/ComplianceTab';
 import WebPresenceTab from '../components/WebPresenceTab';
-import { fetchChecklistsForUser, fetchChecklistItemsForChecklist, Checklist, ChecklistItem } from '../utils/dashboardUtils';
+import { fetchChecklistsForUser, fetchChecklistItemsForChecklist, Checklist, ChecklistItem, deleteChecklist } from '../utils/dashboardUtils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Checkbox } from '../components/ui/checkbox';
 import { Label } from '../components/ui/label';
 import { Button } from '../components/ui/button';
+// import { toast } from '../components/ui/use-toast';
+
+// Helper function to determine if a checklist should be filtered out
+const shouldFilterChecklist = (checklist: Checklist): boolean => {
+  const name = checklist.name.toLowerCase();
+  
+  // Filter out compliance-related checklists
+  if (
+    name === 'compliance dashboard' ||
+    name.includes('compliance') ||
+    name.includes('legal requirement') ||
+    name.includes('regulatory')
+  ) {
+    return true;
+  }
+  
+  // Filter out step-related checklists that should be organized differently
+  if (name.startsWith('step ') || name.match(/^step\s*\d+:/i)) {
+    return true;
+  }
+  
+  return false;
+};
 
 // Component for dynamically generated checklist tabs
 const ChecklistTab: React.FC<{ checklist: Checklist }> = ({ checklist }) => {
@@ -120,21 +143,59 @@ const Dashboard: React.FC = () => {
       const checklists = await fetchChecklistsForUser(user.id);
       console.log('Fetched checklists:', checklists);
       
-      // Filter out ANY compliance-related checklists as they should only appear in the Compliance tab
+      // Filter out ANY compliance-related or step-related checklists
       const filteredChecklists = checklists.filter(
-        checklist => 
-          checklist.name !== 'Compliance Dashboard' &&
-          !checklist.name.toLowerCase().includes('compliance') &&
-          !checklist.name.toLowerCase().includes('legal requirement') &&
-          !checklist.name.toLowerCase().includes('compliance checklist') &&
-          !checklist.name.toLowerCase().includes('compliance dashboard')
+        checklist => !shouldFilterChecklist(checklist)
       );
-      console.log('Filtered checklists (excluding compliance):', filteredChecklists);
+      
+      console.log('Filtered checklists:', filteredChecklists);
       setUserChecklists(filteredChecklists);
+      
+      // Check if we need to clean up any unwanted checklists
+      const unwantedChecklists = checklists.filter(checklist => 
+        // Only consider step-related checklists for cleanup
+        checklist.name.toLowerCase().startsWith('step ') || 
+        checklist.name.toLowerCase().match(/^step\s*\d+:/i)
+      );
+      
+      if (unwantedChecklists.length > 0) {
+        console.log('Found unwanted step checklists that should be cleaned up:', unwantedChecklists);
+        cleanupUnwantedChecklists(unwantedChecklists);
+      }
     } catch (err) {
       console.error('Error loading checklists:', err);
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // Function to clean up unwanted checklists
+  const cleanupUnwantedChecklists = async (checklists: Checklist[]) => {
+    try {
+      console.log(`Cleaning up ${checklists.length} unwanted checklists...`);
+      
+      for (const checklist of checklists) {
+        // Move the checklist items to the Compliance Dashboard checklist
+        const items = await fetchChecklistItemsForChecklist(checklist.id);
+        
+        if (items && items.length > 0) {
+          console.log(`Moving ${items.length} items from "${checklist.name}" to Compliance tab`);
+          // We don't actually need to move the items since the ComplianceTab component
+          // now shows all compliance-related checklists
+        }
+        
+        // Delete the unwanted checklist
+        const deleted = await deleteChecklist(checklist.id);
+        if (deleted) {
+          console.log(`Successfully deleted checklist: ${checklist.name}`);
+        } else {
+          console.error(`Failed to delete checklist: ${checklist.name}`);
+        }
+      }
+      
+      console.log('Cleanup complete');
+    } catch (err) {
+      console.error('Error cleaning up unwanted checklists:', err);
     }
   };
   
@@ -236,16 +297,38 @@ const Dashboard: React.FC = () => {
                 Track your legal documents, compliance progress, and recent activity
               </p>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleManualRefresh}
-              disabled={loading}
-              className="flex items-center gap-2"
-            >
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              Refresh Dashboard
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleManualRefresh}
+                disabled={loading}
+                className="flex items-center gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh Dashboard
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => {
+                  const unwantedChecklists = userChecklists.filter(checklist => 
+                    checklist.name.toLowerCase().startsWith('step ') || 
+                    checklist.name.toLowerCase().match(/^step\s*\d+:/i)
+                  );
+                  if (unwantedChecklists.length > 0) {
+                    cleanupUnwantedChecklists(unwantedChecklists);
+                    // Refresh after cleanup
+                    setTimeout(() => loadChecklists(), 1000);
+                  }
+                }}
+                disabled={loading || userChecklists.filter(c => c.name.toLowerCase().startsWith('step ')).length === 0}
+                className="flex items-center gap-2"
+              >
+                <Trash2 className="h-4 w-4" />
+                Clean Up Step Tabs
+              </Button>
+            </div>
           </div>
           
           {/* Dashboard Tabs */}

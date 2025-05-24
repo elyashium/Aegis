@@ -65,7 +65,9 @@ const formatDateForSupabase = (date: Date): string => {
 // Helper function to determine if a heading is compliance-related
 const isComplianceRelated = (text: string): boolean => {
   const lowerText = text.toLowerCase();
-  return (
+  
+  // Standard compliance keywords
+  if (
     lowerText.includes('compliance') ||
     lowerText.includes('legal requirement') ||
     lowerText.includes('regulatory') ||
@@ -73,7 +75,17 @@ const isComplianceRelated = (text: string): boolean => {
     lowerText.includes('law') ||
     lowerText.includes('legal') ||
     lowerText.includes('requirement')
-  );
+  ) {
+    return true;
+  }
+  
+  // Consider step-based sections as compliance items too
+  // This ensures they all go to the compliance tab
+  if (lowerText.startsWith('step ') || lowerText.match(/^step\s*\d+:/i)) {
+    return true;
+  }
+  
+  return false;
 };
 
 // Parse RAG output to extract sections, checklists, and documents
@@ -817,4 +829,40 @@ export const updateChecklistItemCompletion = async (
     return false;
   }
   return true;
+};
+
+// Delete a checklist and all its items
+export const deleteChecklist = async (
+  checklistId: string
+): Promise<boolean> => {
+  try {
+    console.log(`Deleting checklist ${checklistId} and its items`);
+    
+    // First delete all items associated with this checklist
+    const { error: itemsError } = await supabase
+      .from('checklist_items')
+      .delete()
+      .eq('checklist_id', checklistId);
+    
+    if (itemsError) {
+      console.error('Error deleting checklist items:', itemsError);
+      return false;
+    }
+    
+    // Then delete the checklist itself
+    const { error: checklistError } = await supabase
+      .from('checklists')
+      .delete()
+      .eq('id', checklistId);
+    
+    if (checklistError) {
+      console.error('Error deleting checklist:', checklistError);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Exception in deleteChecklist:', err);
+    return false;
+  }
 }; 

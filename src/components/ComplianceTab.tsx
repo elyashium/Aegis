@@ -44,11 +44,20 @@ const ComplianceTab: React.FC = () => {
           checklist.name.toLowerCase().includes('legal requirement')
         );
         
-        console.log('Found compliance checklists:', complianceRelatedChecklists);
+        // Also include step-based checklists
+        const stepChecklists = allChecklists.filter(checklist => 
+          checklist.name.toLowerCase().startsWith('step ') || 
+          checklist.name.toLowerCase().match(/^step\s*\d+:/i)
+        );
         
-        // For each compliance checklist, fetch its items
+        // Combine both types of checklists
+        const allRelevantChecklists = [...complianceRelatedChecklists, ...stepChecklists];
+        
+        console.log('Found compliance and step checklists:', allRelevantChecklists);
+        
+        // For each checklist, fetch its items
         const checklistsWithItems = await Promise.all(
-          complianceRelatedChecklists.map(async (checklist) => {
+          allRelevantChecklists.map(async (checklist) => {
             const items = await fetchChecklistItemsForChecklist(checklist.id);
             return { 
               checklist,
@@ -57,7 +66,35 @@ const ComplianceTab: React.FC = () => {
           })
         );
         
-        setComplianceChecklists(checklistsWithItems);
+        // Sort checklists: first regular compliance ones, then step-based ones in order
+        const sortedChecklists = checklistsWithItems.sort((a, b) => {
+          const aName = a.checklist.name.toLowerCase();
+          const bName = b.checklist.name.toLowerCase();
+          
+          // Step-based checklists should be sorted by step number
+          const aIsStep = aName.startsWith('step ') || aName.match(/^step\s*\d+:/i);
+          const bIsStep = bName.startsWith('step ') || bName.match(/^step\s*\d+:/i);
+          
+          // If both are step-based or neither is step-based
+          if (aIsStep === bIsStep) {
+            if (aIsStep) {
+              // Extract step numbers for comparison
+              const aMatch = aName.match(/step\s*(\d+)/i);
+              const bMatch = bName.match(/step\s*(\d+)/i);
+              const aNum = aMatch ? parseInt(aMatch[1]) : 0;
+              const bNum = bMatch ? parseInt(bMatch[1]) : 0;
+              return aNum - bNum;
+            } else {
+              // For non-step checklists, sort alphabetically
+              return aName.localeCompare(bName);
+            }
+          }
+          
+          // Put non-step checklists before step checklists
+          return aIsStep ? 1 : -1;
+        });
+        
+        setComplianceChecklists(sortedChecklists);
       } catch (err: any) {
         console.error('Error loading compliance data:', err);
         setError(err.message || 'Failed to load compliance data');
