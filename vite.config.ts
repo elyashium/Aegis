@@ -12,7 +12,7 @@ export default defineConfig({
       '/api': {
         target: 'https://5e8e-34-125-160-206.ngrok-free.app',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+        rewrite: (path) => path.replace(/^\/api/, ''), 
         headers: {
           'ngrok-skip-browser-warning': 'true'
         }
