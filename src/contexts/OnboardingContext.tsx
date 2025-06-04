@@ -205,6 +205,7 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setOnboardingState(prev => ({ ...prev, dashboardCreated: created }));
   };
 
+  
   const value = {
     onboardingState,
     setUserType,
