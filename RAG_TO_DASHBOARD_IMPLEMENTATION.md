@@ -111,4 +111,5 @@ Potential improvements to consider:
 1. More sophisticated document requirement detection using NLP
 2. Custom notification system for users when checklist items are due
 3. Integration with document generation for required documents
-4. Ability to merge/update existing checklists rather than creating new ones 
+4. Ability to merge/update existing checklists rather than creating new ones
+5. on chain document verification 
